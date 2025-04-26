@@ -118,7 +118,6 @@ class microMX1508:
         motors_changed = False
 
         # Update motor 1 speed
-        print(self.m1_current_speed, self.m1_target_speed)
         if self.m1_current_speed < self.m1_target_speed:
             self.m1_current_speed = min(self.m1_target_speed,
                                         self.m1_current_speed + self.accel_rate)
@@ -149,42 +148,3 @@ class microMX1508:
 
     def set_update_interval(self, interval_ms):
         self.update_interval = max(5, interval_ms)  # Minimum 5ms
-
-
-# if __name__ == "__main__":
-#     motor1_pins = (2, 4)
-#     motor2_pins = (12, 13)
-#
-#     motors = microMX1508(motor1_pins, motor2_pins, accel_rate=20)
-#     time.sleep(1)
-#
-#     motors.set_motor1(80)
-#     no = 0
-#     while motors.update():
-#         print(f"Update no {no}")
-#         no += 1
-#         time.sleep(1)
-#
-#     time.sleep(1)
-#     motors.set_motor1(0)
-#     no = 0
-#     while motors.update():
-#         print(f"Update no {no}")
-#         no += 1
-#         time.sleep(1)
-#
-#     time.sleep(1)
-#     motors.set_motor1(-80)
-#     no = 0
-#     while motors.update():
-#         print(f"Update no {no}")
-#         no += 1
-#         time.sleep(1)
-#
-#     time.sleep(1)
-#     motors.stop()
-#     no = 0
-#     while motors.update():
-#         print(f"Update no {no}")
-#         no += 1
-#         time.sleep(1)
