@@ -17,19 +17,8 @@ if __name__ == "__main__":
     # Motors.
     motor1_pins = (27, 14)
     motor2_pins = (12, 13)
-    motors = microMX1508(motor1_pins, motor2_pins, accel_rate=5)
+    motors = microMX1508(motor1_pins, motor2_pins, accel_rate=5, max_speed_percent=30)
     time.sleep(1)
-
-    def turn_left():
-        motors.set_motor1(40)
-        motors.set_motor2(-40)
-
-    def turn_right():
-        motors.set_motor1(-40)
-        motors.set_motor2(40)
-
-    def stop():
-        motors.stop()
 
     previous_heading = 0
     heading = 0
@@ -45,15 +34,15 @@ if __name__ == "__main__":
 
             if heading < 100:
                 print("LEFT")
-                turn_left()
+                motors.turn_left()
 
             elif heading > 200:
                 print("RIGHT")
-                turn_right()
+                motors.turn_right()
 
             else:
                 print("STOP")
-                stop()
+                motors.move_stop()
 
         time.sleep(0.25)
         print(heading)

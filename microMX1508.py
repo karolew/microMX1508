@@ -8,7 +8,11 @@ class microMX1508:
     Features smooth acceleration and minimal resource usage.
     """
 
-    def __init__(self, motor1_pins: tuple, motor2_pins: tuple, freq: int = 1000, accel_rate: int = 10) -> None:
+    def __init__(self, motor1_pins: tuple,
+                 motor2_pins: tuple,
+                 freq: int = 1000,
+                 accel_rate: int = 10,
+                 max_speed_percent: int = 50) -> None:
         """Initialize the motors with their control pins.
 
         Args:
@@ -28,25 +32,31 @@ class microMX1508:
         # Set PWM duty cycle range.
         self.max_duty = 1023
 
-        # Motor speeds and targets (0 to 100 percent)
+        # Motor speeds and targets (0 to 100 percent).
         self.m1_current_speed = 0
         self.m1_target_speed = 0
-        self.m1_direction = 1  # 1 forward, -1 reverse
+        self.m1_direction = 1       # 1 forward, -1 reverse.
 
         self.m2_current_speed = 0
         self.m2_target_speed = 0
         self.m2_direction = 1
 
-        # Acceleration parameters
-        self.accel_rate = max(1, min(100, accel_rate))  # Constrain between 1-100
+        # Acceleration parameters.
+        self.accel_rate = max(1, min(100, accel_rate))  # Constrain between 1-100.
 
-        # Timing for non-blocking operation
+        # Max speed.
+        self.max_speed_percent = max_speed_percent
+
+        # Timing for non-blocking operation.
         self.last_update = time.ticks_ms()
-        self.update_interval = 20  # milliseconds between updates
+        self.update_interval = 20       # milliseconds between updates.
 
-        # Initialize motors to stopped state
+        # Initialize motors to stopped state.
         self._apply_motor1_speed(0)
         self._apply_motor2_speed(0)
+
+        # Control status.
+        self.motors_status = "stop"     # stop, forward, left, right.
 
     def _apply_motor1_speed(self, speed_percent):
         duty = int(speed_percent * self.max_duty / 100)
@@ -148,3 +158,40 @@ class microMX1508:
 
     def set_update_interval(self, interval_ms):
         self.update_interval = max(5, interval_ms)  # Minimum 5ms
+
+    def turn_right(self):
+        if self.motors_status == "right":
+            pass
+        elif self.motors_status != "stop":
+            self.stop()
+        else:
+            self.set_motor1(self.max_speed_percent)
+            self.set_motor2(-self.max_speed_percent)
+            self.motors_status = "right"
+
+    def turn_left(self):
+        if self.motors_status == "left":
+            pass
+        elif self.motors_status != "stop":
+            self.stop()
+        else:
+            self.set_motor1(-self.max_speed_percent)
+            self.set_motor2(self.max_speed_percent)
+            self.motors_status = "left"
+
+    def move_forward(self):
+        if self.motors_status == "forward":
+            pass
+        elif self.motors_status != "stop":
+            self.stop()
+        else:
+            self.set_motor1(self.max_speed_percent)
+            self.set_motor2(self.max_speed_percent)
+            self.motors_status = "forward"
+
+    def move_stop(self):
+        if self.motors_status == "stop":
+            pass
+        else:
+            self.stop()
+            self.motors_status = "stop"
