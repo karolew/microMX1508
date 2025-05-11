@@ -46,6 +46,7 @@ class microMX1508:
 
         # Max speed.
         self.max_speed_percent = max_speed_percent
+        self.turning_force_levels = [self.max_speed_percent//2, 0, -self.max_speed_percent]
 
         # Timing for non-blocking operation.
         self.last_update = time.ticks_ms()
@@ -159,23 +160,25 @@ class microMX1508:
     def set_update_interval(self, interval_ms):
         self.update_interval = max(5, interval_ms)  # Minimum 5ms
 
-    def turn_right(self):
+    def turn_right(self, turning_force: int = 0):
         if self.motors_status == "right":
             pass
         elif self.motors_status != "stop":
             self.stop()
+            self.motors_status = "stop"
         else:
             self.set_motor1(self.max_speed_percent)
-            self.set_motor2(-self.max_speed_percent)
+            self.set_motor2(self.turning_force_levels[turning_force])
             self.motors_status = "right"
 
-    def turn_left(self):
+    def turn_left(self, turning_force: int = 0):
         if self.motors_status == "left":
             pass
         elif self.motors_status != "stop":
             self.stop()
+            self.motors_status = "stop"
         else:
-            self.set_motor1(-self.max_speed_percent)
+            self.set_motor1(self.turning_force_levels[turning_force])
             self.set_motor2(self.max_speed_percent)
             self.motors_status = "left"
 
@@ -184,14 +187,13 @@ class microMX1508:
             pass
         elif self.motors_status != "stop":
             self.stop()
+            self.motors_status = "stop"
         else:
             self.set_motor1(self.max_speed_percent)
             self.set_motor2(self.max_speed_percent)
             self.motors_status = "forward"
 
     def move_stop(self):
-        if self.motors_status == "stop":
-            pass
-        else:
+        if self.motors_status != "stop":
             self.stop()
             self.motors_status = "stop"
