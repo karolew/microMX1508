@@ -1,199 +1,232 @@
 import time
-from machine import Pin, PWM
+
+from machine import PWM, Pin
+
+
+class States:
+    """
+    States to represent motor movements directions.
+    """
+    reverse = -1
+    stop = 0
+    forward = 1
 
 
 class microMX1508:
-    """
-    A non-blocking motor controller for MX1508 motor driver.
-    Features smooth acceleration and minimal resource usage.
-    """
-
-    def __init__(self, motor1_pins: tuple,
+    def __init__(self,
+                 motor1_pins: tuple,
                  motor2_pins: tuple,
                  freq: int = 1000,
-                 accel_rate: int = 10,
-                 max_speed_percent: int = 50) -> None:
-        """Initialize the motors with their control pins.
-
-        Args:
-            motor1_pins: Tuple of (in1, in2) pins for motor 1.
-            motor2_pins: Tuple of (in1, in2) pins for motor 2.
-            freq: PWM frequency in Hz (default 1000).
-            accel_rate: Acceleration rate in steps per update (1-100).
+                 max_duty: int = 1023,
+                 accel_step: int = 50,
+                 accel_delay_ms: int = 20) -> None:
         """
-        # Motor 1 setup
-        self.m1_pwm1 = PWM(Pin(motor1_pins[0]), freq=freq)
-        self.m1_pwm2 = PWM(Pin(motor1_pins[1]), freq=freq)
+        Initialize the motor controller.
+        motor1_pins: Tuple (in1, in2) for motor 1 control pins
+        motor2_pins: Tuple (in1, in2) for motor 2 control pins
+        freq: PWM frequency in Hz
+        max_duty: Maximum duty cycle value
+        accel_step: Step size for acceleration (duty cycle increment)
+        accel_delay_ms: Delay in ms between acceleration steps
+        """
+        # Initialize PWM pins for motor 1
+        self.motor1_pin1 = PWM(Pin(motor1_pins[0]), freq=freq)
+        self.motor1_pin2 = PWM(Pin(motor1_pins[1]), freq=freq)
 
-        # Motor 2 setup
-        self.m2_pwm1 = PWM(Pin(motor2_pins[0]), freq=freq)
-        self.m2_pwm2 = PWM(Pin(motor2_pins[1]), freq=freq)
+        # Initialize PWM pins for motor 2
+        self.motor2_pin1 = PWM(Pin(motor2_pins[0]), freq=freq)
+        self.motor2_pin2 = PWM(Pin(motor2_pins[1]), freq=freq)
 
-        # Set PWM duty cycle range.
-        self.max_duty = 1023
+        # Configuration parameters
+        self.max_duty = max_duty
+        self.accel_step = accel_step
+        self.accel_delay_ms = accel_delay_ms
 
-        # Motor speeds and targets (0 to 100 percent).
-        self.m1_current_speed = 0
-        self.m1_target_speed = 0
-        self.m1_direction = 1       # 1 forward, -1 reverse.
+        # Current state and target values
+        self.motor1_current_duty = 0
+        self.motor2_current_duty = 0
+        self.motor1_target_duty = 0
+        self.motor2_target_duty = 0
+        self.motor1_target_direction = States.stop
+        self.motor2_target_direction = States.stop
+        self.motor1_current_direction = States.stop
+        self.motor2_current_direction = States.stop
 
-        self.m2_current_speed = 0
-        self.m2_target_speed = 0
-        self.m2_direction = 1
+        # Timestamp for acceleration control
+        self.last_update_time = time.ticks_ms()
+        self.transitioning = False
 
-        # Acceleration parameters.
-        self.accel_rate = max(1, min(100, accel_rate))  # Constrain between 1-100.
+        # Initialize motors to stopped state
+        self._stop_immediately()
 
-        # Max speed.
-        self.max_speed_percent = max_speed_percent
-        self.turning_force_levels = [self.max_speed_percent//2, 0, -self.max_speed_percent]
-
-        # Timing for non-blocking operation.
-        self.last_update = time.ticks_ms()
-        self.update_interval = 20       # milliseconds between updates.
-
-        # Initialize motors to stopped state.
-        self._apply_motor1_speed(0)
-        self._apply_motor2_speed(0)
-
-        # Control status.
-        self.motors_status = "stop"     # stop, forward, left, right.
-
-    def _apply_motor1_speed(self, speed_percent):
-        duty = int(speed_percent * self.max_duty / 100)
-
-        if self.m1_direction == 1:  # Forward
-            self.m1_pwm1.duty(duty)
-            self.m1_pwm2.duty(0)
+    def _set_motor_speed(self, motor_pin1: tuple, motor_pin2: tuple, speed: int, direction: int) -> None:
+        if direction == States.stop or speed == 0:  # Stop
+            motor_pin1.duty(0)
+            motor_pin2.duty(0)
+        elif direction == States.forward:
+            motor_pin1.duty(speed)
+            motor_pin2.duty(0)
         else:  # Reverse
-            self.m1_pwm1.duty(0)
-            self.m1_pwm2.duty(duty)
+            motor_pin1.duty(0)
+            motor_pin2.duty(speed)
 
-    def _apply_motor2_speed(self, speed_percent):
-        duty = int(speed_percent * self.max_duty / 100)
-
-        if self.m2_direction == 1:  # Forward
-            self.m2_pwm1.duty(duty)
-            self.m2_pwm2.duty(0)
-        else:  # Reverse
-            self.m2_pwm1.duty(0)
-            self.m2_pwm2.duty(duty)
-
-    def set_motor1(self, speed):
-        """Set target speed for motor 1.
+    def update(self) -> None:
         """
-        if speed < 0:
-            self.m1_direction = -1
-            self.m1_target_speed = min(100, abs(speed))
-        else:
-            self.m1_direction = 1
-            self.m1_target_speed = min(100, speed)
-
-    def set_motor2(self, speed):
-        """Set target speed for motor 2.
-        """
-        if speed < 0:
-            self.m2_direction = -1
-            self.m2_target_speed = min(100, abs(speed))
-        else:
-            self.m2_direction = 1
-            self.m2_target_speed = min(100, speed)
-
-    def stop(self):
-        """Stop both motors (set target speed to 0)
-        """
-        self.m1_target_speed = 0
-        self.m2_target_speed = 0
-
-    def stop_immediate(self):
-        """Immediately stop both motors (no smooth deceleration)
-        """
-        self.m1_current_speed = 0
-        self.m2_current_speed = 0
-        self.m1_target_speed = 0
-        self.m2_target_speed = 0
-        self._apply_motor1_speed(0)
-        self._apply_motor2_speed(0)
-
-    def update(self):
-        """Update motor speeds according to targets (non-blocking).
-        Call this method frequently in your main loop.
+        Update motor speeds for smooth acceleration.
+        This method should be called regularly in the main loop.
         """
         current_time = time.ticks_ms()
+        # Check if it's time to update speeds (non-blocking)
+        if time.ticks_diff(current_time, self.last_update_time) >= self.accel_delay_ms:
+            self.last_update_time = current_time
 
-        # Only update at specified intervals to reduce CPU usage
-        if time.ticks_diff(current_time, self.last_update) < self.update_interval:
-            return False
+            # Handle direction transitions
+            # For motor 1
+            if self.motor1_current_direction != self.motor1_target_direction:
+                # If current speed is not zero, decelerate first
+                if self.motor1_current_duty > 0:
+                    self.motor1_current_duty = max(self.motor1_current_duty - self.accel_step, 0)
+                    self._set_motor_speed(self.motor1_pin1,
+                                          self.motor1_pin2,
+                                          self.motor1_current_duty,
+                                          self.motor1_current_direction)
+                    self.transitioning = True
+                else:
+                    # Once speed reaches zero, change direction
+                    self.motor1_current_direction = self.motor1_target_direction
+                    self.transitioning = False
+            else:
+                # Update motor 1 speed when directions match
+                if self.motor1_current_duty < self.motor1_target_duty:
+                    self.motor1_current_duty = min(self.motor1_current_duty + self.accel_step,
+                                                   self.motor1_target_duty)
+                elif self.motor1_current_duty > self.motor1_target_duty:
+                    self.motor1_current_duty = max(self.motor1_current_duty - self.accel_step,
+                                                   self.motor1_target_duty)
 
-        self.last_update = current_time
-        motors_changed = False
+                if self.motor1_current_duty > 0:
+                    self._set_motor_speed(self.motor1_pin1,
+                                          self.motor1_pin2,
+                                          self.motor1_current_duty,
+                                          self.motor1_current_direction)
 
-        # Update motor 1 speed
-        if self.m1_current_speed < self.m1_target_speed:
-            self.m1_current_speed = min(self.m1_target_speed,
-                                        self.m1_current_speed + self.accel_rate)
-            self._apply_motor1_speed(self.m1_current_speed)
-            motors_changed = True
-        elif self.m1_current_speed > self.m1_target_speed:
-            self.m1_current_speed = max(self.m1_target_speed,
-                                        self.m1_current_speed - self.accel_rate)
-            self._apply_motor1_speed(self.m1_current_speed)
-            motors_changed = True
+            # For motor 2 - same logic as motor 1
+            if self.motor2_current_direction != self.motor2_target_direction:
+                # If current speed is not zero, decelerate first
+                if self.motor2_current_duty > 0:
+                    self.motor2_current_duty = max(self.motor2_current_duty - self.accel_step, 0)
+                    self._set_motor_speed(self.motor2_pin1,
+                                          self.motor2_pin2,
+                                          self.motor2_current_duty,
+                                          self.motor2_current_direction)
+                    self.transitioning = True
+                else:
+                    # Once speed reaches zero, change direction
+                    self.motor2_current_direction = self.motor2_target_direction
+                    self.transitioning = False
+            else:
+                # Update motor 2 speed when directions match
+                if self.motor2_current_duty < self.motor2_target_duty:
+                    self.motor2_current_duty = min(self.motor2_current_duty + self.accel_step,
+                                                   self.motor2_target_duty)
+                elif self.motor2_current_duty > self.motor2_target_duty:
+                    self.motor2_current_duty = max(self.motor2_current_duty - self.accel_step,
+                                                   self.motor2_target_duty)
 
-        # Update motor 2 speed
-        if self.m2_current_speed < self.m2_target_speed:
-            self.m2_current_speed = min(self.m2_target_speed,
-                                        self.m2_current_speed + self.accel_rate)
-            self._apply_motor2_speed(self.m2_current_speed)
-            motors_changed = True
-        elif self.m2_current_speed > self.m2_target_speed:
-            self.m2_current_speed = max(self.m2_target_speed,
-                                        self.m2_current_speed - self.accel_rate)
-            self._apply_motor2_speed(self.m2_current_speed)
-            motors_changed = True
+                if self.motor2_current_duty > 0:
+                    self._set_motor_speed(self.motor2_pin1,
+                                          self.motor2_pin2,
+                                          self.motor2_current_duty,
+                                          self.motor2_current_direction)
 
-        return motors_changed
+    def _stop_immediately(self) -> None:
+        """
+        Internal method to immediately stop motors (used for initialization)
+        """
+        self.motor1_current_duty = 0
+        self.motor2_current_duty = 0
+        self.motor1_target_duty = 0
+        self.motor2_target_duty = 0
+        self.motor1_current_direction = States.stop
+        self.motor2_current_direction = States.stop
+        self.motor1_target_direction = States.stop
+        self.motor2_target_direction = States.stop
+        self._set_motor_speed(self.motor1_pin1, self.motor1_pin2, 0, States.stop)
+        self._set_motor_speed(self.motor2_pin1, self.motor2_pin2, 0, States.stop)
+        self.transitioning = False
 
-    def set_acceleration_rate(self, rate):
-        self.accel_rate = max(1, min(100, rate))
+    def is_transitioning(self) -> bool:
+        """
+        Check if motors are transitioning between states.
+        Returns True if motors are still accelerating/decelerating.
+        """
+        if self.transitioning:
+            return True
 
-    def set_update_interval(self, interval_ms):
-        self.update_interval = max(5, interval_ms)  # Minimum 5ms
+        m1_transitioning = (self.motor1_current_duty != self.motor1_target_duty or
+                            self.motor1_current_direction != self.motor1_target_direction)
+        m2_transitioning = (self.motor2_current_duty != self.motor2_target_duty or
+                            self.motor2_current_direction != self.motor2_target_direction)
+        return m1_transitioning or m2_transitioning
 
-    def turn_right(self, turning_force: int = 0):
-        if self.motors_status == "right":
-            pass
-        elif self.motors_status != "stop":
-            self.stop()
-            self.motors_status = "stop"
-        else:
-            self.set_motor1(self.max_speed_percent)
-            self.set_motor2(self.turning_force_levels[turning_force])
-            self.motors_status = "right"
+    def forward(self) -> None:
+        """
+        Set both motors to move forward with full speed.
+        """
+        self.motor1_target_direction = States.forward
+        self.motor2_target_direction = States.forward
+        self.motor1_target_duty = self.max_duty
+        self.motor2_target_duty = self.max_duty
 
-    def turn_left(self, turning_force: int = 0):
-        if self.motors_status == "left":
-            pass
-        elif self.motors_status != "stop":
-            self.stop()
-            self.motors_status = "stop"
-        else:
-            self.set_motor1(self.turning_force_levels[turning_force])
-            self.set_motor2(self.max_speed_percent)
-            self.motors_status = "left"
+    def stop(self) -> None:
+        """
+        Smoothly stop both motors.
+        """
+        self.motor1_target_direction = States.stop
+        self.motor2_target_direction = States.stop
+        self.motor1_target_duty = 0
+        self.motor2_target_duty = 0
 
-    def move_forward(self):
-        if self.motors_status == "forward":
-            pass
-        elif self.motors_status != "stop":
-            self.stop()
-            self.motors_status = "stop"
-        else:
-            self.set_motor1(self.max_speed_percent)
-            self.set_motor2(self.max_speed_percent)
-            self.motors_status = "forward"
+    def turn_right(self, turning_force_level: int = 1) -> None:
+        """
+        Turn left with specified force level.
+        turning_force_level: Integer 0-3 controlling turn sharpness
+        """
+        self.motor1_target_direction = States.forward
+        self.motor1_target_duty = self.max_duty
 
-    def move_stop(self):
-        if self.motors_status != "stop":
-            self.stop()
-            self.motors_status = "stop"
+        # Apply turning force level to adjust right motor
+        if turning_force_level == 0:  # Slight turn - right motor at 80%
+            self.motor2_target_direction = States.forward
+            self.motor2_target_duty = int(self.max_duty * 0.8)
+        elif turning_force_level == 1:  # Medium turn - right motor at 50%
+            self.motor2_target_direction = States.forward
+            self.motor2_target_duty = int(self.max_duty * 0.5)
+        elif turning_force_level == 2:  # Sharp turn - right motor stopped
+            self.motor2_target_direction = States.stop
+            self.motor2_target_duty = 0
+        elif turning_force_level == 3:  # Max turn - right motor reversed
+            self.motor2_target_direction = States.reverse
+            self.motor2_target_duty = self.max_duty
+
+    def turn_left(self, turning_force_level: int = 1) -> None:
+        """
+        Turn right with specified force level.
+        turning_force_level: Integer 0-3 controlling turn sharpness
+        """
+        self.motor2_target_direction = States.forward
+        self.motor2_target_duty = self.max_duty
+
+        # Apply turning force level to adjust left motor
+        if turning_force_level == 0:  # Slight turn - left motor at 80%
+            self.motor1_target_direction = States.forward
+            self.motor1_target_duty = int(self.max_duty * 0.8)
+        elif turning_force_level == 1:  # Medium turn - left motor at 50%
+            self.motor1_target_direction = States.forward
+            self.motor1_target_duty = int(self.max_duty * 0.5)
+        elif turning_force_level == 2:  # Sharp turn - left motor stopped
+            self.motor1_target_direction = States.stop
+            self.motor1_target_duty = 0
+        elif turning_force_level == 3:  # Max turn - left motor reversed
+            self.motor1_target_direction = States.reverse
+            self.motor1_target_duty = self.max_duty

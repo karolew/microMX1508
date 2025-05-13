@@ -3,47 +3,57 @@
 # Tested on ESP32 WROOM v2.
 
 import time
-from machine import Pin, I2C
+
+from gy271compass import QMC5883L
+from machine import I2C, Pin
 
 from microMX1508 import microMX1508
-from gy271compass import QMC5883L
-
 
 if __name__ == "__main__":
     # Compass.
     i2c = I2C(0, scl=Pin(22), sda=Pin(21), freq=100000)
-    compass = QMC5883L(i2c, corrections={"x_offset": 162, "x_scale": 1.04, "y_offset": -211, "y_scale": 0.97})
+    compass = QMC5883L(i2c,
+                       None,
+                       (-2364, -496, 68),
+                       [[1.118951, 0.0, 0.0],
+                        [0.0, 1.07733, 0.0],
+                        [0.0, 0.0, 0.8488354]])
 
     # Motors.
-    motor1_pins = (27, 14)
-    motor2_pins = (12, 13)
-    motors = microMX1508(motor1_pins, motor2_pins, accel_rate=5, max_speed_percent=30)
+    motors =  microMX1508((27, 14),
+                          (12, 13),
+                          accel_step=200,
+                          max_duty=512)
     time.sleep(1)
 
     previous_heading = 0
     heading = 0
+    direction = None
     while True:
         try:
             heading = compass.get_heading()
         except Exception as e:
             print("Issue with I2C.")
+            continue
 
-        # Reaguj na zmiany większe niż 10 stopni.
-        if abs(heading - previous_heading) >= 10:
-            previous_heading = heading
+        if heading <= 15:
+            direction = "LEWO"
+            motors.turn_left(1)
 
-            if heading < 100:
-                print("LEFT")
-                motors.turn_left()
+        elif heading >= 20:
+            direction = "PRAWO"
+            motors.turn_right(1)
 
-            elif heading > 200:
-                print("RIGHT")
-                motors.turn_right()
+        elif 15 < heading < 20:
+            direction = "PROSTO"
+            motors.forward()
 
-            else:
-                print("STOP")
-                motors.move_stop()
+        print(direction,
+              heading,
+              motors.motor1_current_duty,
+              motors.motor1_target_direction,
+              motors.motor2_current_duty,
+              motors.motor2_target_direction)
 
-        time.sleep(0.25)
-        print(heading)
+        time.sleep(0.1)
         motors.update()
